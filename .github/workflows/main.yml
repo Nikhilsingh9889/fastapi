@@ -1,4 +1,4 @@
-name: Test Runner
+name: Deploy FastAPI App
 
 on:
   push:
@@ -6,16 +6,23 @@ on:
       - main
 
 jobs:
-  test:
+  deploy:
     runs-on: self-hosted
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Print GitHub workspace
+      - name: Print workspace info
         run: |
-          echo "GitHub Workspace:"
-          echo $GITHUB_WORKSPACE
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
           pwd
           ls -la
+
+      - name: Docker Compose Build and Start
+        run: |
+          cd $GITHUB_WORKSPACE
+          docker compose up --build -d
+
+      - name: Show running containers
+        run: docker ps
