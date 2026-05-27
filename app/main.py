@@ -12,7 +12,7 @@ redis_client = redis.Redis(
 
 @app.get("/")
 def home():
-    return {"message": "FastAPI Production App Running"}
+    return {"message": "FastAPI Production Mobile App Running"}
 
 @app.get("/health")
 def health():
