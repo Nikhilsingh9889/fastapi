@@ -1,0 +1,21 @@
+name: Test Runner
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Print GitHub workspace
+        run: |
+          echo "GitHub Workspace:"
+          echo $GITHUB_WORKSPACE
+          pwd
+          ls -la
