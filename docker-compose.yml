@@ -17,7 +17,7 @@ services:
   postgres:
     image: postgres:16
     container_name: postgres-db
-    restart: always
+    restart: unless-stopped
     env_file:
       - .env.psql
     volumes:
@@ -28,7 +28,7 @@ services:
   redis:
     image: redis:7
     container_name: redis-cache
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
