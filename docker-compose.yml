@@ -1,9 +1,9 @@
-version: '3.9'
-
 services:
 
   fastapi:
-    build: ./app
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: fastapi-app
     restart: always
     env_file:
@@ -20,10 +20,6 @@ services:
     restart: always
     env_file:
       - .env.psql
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
