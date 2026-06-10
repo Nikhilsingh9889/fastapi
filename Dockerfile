@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-### This one is for Dev ##
+### This one is for Dev Enviorment##
 WORKDIR /app
 
 COPY app/requirements.txt .
