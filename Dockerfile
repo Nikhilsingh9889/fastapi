@@ -1,5 +1,9 @@
 FROM python:3.12-slim
+<<<<<<< HEAD
 ### This one is for Dev Enviorment##
+=======
+### This one is for Demo Purpose###
+>>>>>>> 2390ace (update code)
 WORKDIR /app
 
 COPY app/requirements.txt .
