@@ -1,0 +1,39 @@
+name: Rollback FastAPI App
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      version:
+        description: "Release version to rollback"
+        required: true
+        default: "v1"
+
+
+jobs:
+
+  rollback:
+
+    runs-on: self-hosted
+
+
+    steps:
+
+      - name: Checkout selected release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+
+      - name: Deploy rollback version
+        run: |
+          echo "Rolling back to ${{ inputs.version }}"
+
+          docker compose down
+
+          docker compose up --build -d
+
+
+      - name: Check running containers
+        run: |
+          docker ps
