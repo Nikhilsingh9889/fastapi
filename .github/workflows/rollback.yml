@@ -18,9 +18,10 @@ jobs:
 
     steps:
 
-      - name: Show rollback version
+      - name: Backup environment files
         run: |
-          echo "Rolling back to ${{ inputs.version }}"
+          cp .env /tmp/app.env
+          cp .env.psql /tmp/app.env.psql
 
 
       - name: Checkout selected release
@@ -29,6 +30,17 @@ jobs:
           ref: ${{ inputs.version }}
           clean: false
           fetch-depth: 0
+
+
+      - name: Restore environment files
+        run: |
+          cp /tmp/app.env .env
+          cp /tmp/app.env.psql .env.psql
+
+
+      - name: Show rollback version
+        run: |
+          echo "Rolling back to ${{ inputs.version }}"
 
 
       - name: Stop current deployment
@@ -55,4 +67,3 @@ jobs:
         run: |
           sleep 10
           curl -f http://localhost:8000/health
-
