@@ -1,25 +1,64 @@
-name: Build FastAPI App
+name: CI/CD Pipeline
 
 on:
   push:
     branches:
       - main
-
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
       - name: Build Docker image
         run: |
-          docker build \
-            -t fastapi-app:latest .
+          docker build -t fastapi-app:latest .
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+  deploy:
+    needs: release
+    runs-on: self-hosted
+    steps:
+      - name: Debug
+        run: |
+          echo "Deploying version ${{ needs.release.outputs.version }}"
+
+      - name: Checkout release version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.version }}
+          clean: false
+
+      - name: Deploy
+        run: |
+          docker compose down
+          docker compose up --build -d
+
+      - name: Check containers
+        run: |
+          docker ps
