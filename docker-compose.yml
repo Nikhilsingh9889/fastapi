@@ -1,57 +1,44 @@
-name: Deploy FastAPI
+services:
 
-on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Docker image tag"
-        required: false
-        default: latest
+  fastapi:
+    image: ${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    container_name: fastapi-app
+    restart: unless-stopped
 
-permissions:
-  packages: read
+    env_file:
+      - .env
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/fastapi-app
+    depends_on:
+      - postgres
+      - redis
 
-jobs:
-
-  deploy:
-
-    runs-on: self-hosted
-
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    ports:
+      - "8000:8000"
 
 
-      - name: Login to GHCR
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
-          -u "${{ github.actor }}" \
-          --password-stdin
+  postgres:
+    image: postgres:16
+    container_name: postgres-db
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    ports:
+      - "5432:5432"
 
 
-      - name: Pull image
-        run: |
-          docker pull $IMAGE_NAME:${{ github.event.inputs.tag }}
+  redis:
+    image: redis:7
+    container_name: redis-cache
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
 
 
-      - name: Deploy containers
-        run: |
-          export IMAGE_NAME=$IMAGE_NAME
-          export IMAGE_TAG=${{ github.event.inputs.tag }}
-
-          docker compose down || true
-          docker compose up -d
-
-
-      - name: Cleanup old images
-        run: |
-          docker image prune -af
-
-
-      - name: Check running containers
-        run: |
-          docker ps
+volumes:
+  postgres_data:
