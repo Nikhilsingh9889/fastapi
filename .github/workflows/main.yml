@@ -10,11 +10,8 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
 
-    env:
-      IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/fastapi-app
-      IMAGE_TAG: ${{ github.event.inputs.tag }}
+    runs-on: self-hosted
 
     steps:
 
@@ -24,47 +21,43 @@ jobs:
           clean: false
 
 
-      - name: Print workspace info
+      - name: Set image variables
         run: |
-          echo "Workspace: $GITHUB_WORKSPACE"
-          echo "Image: $IMAGE_NAME:$IMAGE_TAG"
-          pwd
-          ls -la
+          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/fastapi-app" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
 
 
-      - name: Login to GitHub Container Registry
+      - name: Debug variables
+        run: |
+          echo "IMAGE_NAME=$IMAGE_NAME"
+          echo "IMAGE_TAG=$IMAGE_TAG"
+
+
+      - name: Login GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
           -u "${{ github.actor }}" \
           --password-stdin
 
 
-      - name: Pull Docker image
+      - name: Pull image
         run: |
           docker pull $IMAGE_NAME:$IMAGE_TAG
 
 
-      - name: Stop old containers
+      - name: Deploy with Docker Compose
         run: |
           cd $GITHUB_WORKSPACE
+
+          IMAGE_NAME=$IMAGE_NAME \
+          IMAGE_TAG=$IMAGE_TAG \
           docker compose down || true
 
-
-      - name: Deploy application
-        run: |
-          cd $GITHUB_WORKSPACE
-
-          export IMAGE_NAME=$IMAGE_NAME
-          export IMAGE_TAG=$IMAGE_TAG
-
+          IMAGE_NAME=$IMAGE_NAME \
+          IMAGE_TAG=$IMAGE_TAG \
           docker compose up -d
 
 
-      - name: Show running containers
+      - name: Show containers
         run: |
           docker ps
-
-
-      - name: Cleanup unused images
-        run: |
-          docker image prune -af
