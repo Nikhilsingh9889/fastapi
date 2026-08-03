@@ -8,25 +8,51 @@ on:
         required: true
         default: "v19"
 
+
 jobs:
+
   rollback:
+
     runs-on: self-hosted
 
+
     steps:
+
+      - name: Show rollback version
+        run: |
+          echo "Rolling back to ${{ inputs.version }}"
+
+
       - name: Checkout selected release
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.version }}
           clean: false
+          fetch-depth: 0
 
-      - name: Deploy rollback version
+
+      - name: Stop current deployment
         run: |
-          echo "Rolling back to ${{ inputs.version }}"
-
           docker compose down
 
-          docker compose up --build -d
 
-      - name: Check running containers
+      - name: Build rollback version
+        run: |
+          docker compose build --no-cache
+
+
+      - name: Start rollback deployment
+        run: |
+          docker compose up -d
+
+
+      - name: Verify containers
         run: |
           docker ps
+
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -f http://localhost:8000/health
+
