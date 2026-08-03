@@ -1,5 +1,6 @@
 name: Create Release
 
+
 on:
   workflow_run:
     workflows:
@@ -14,6 +15,7 @@ permissions:
 
 jobs:
 
+
   release:
 
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
@@ -21,9 +23,13 @@ jobs:
     runs-on: ubuntu-latest
 
 
+    outputs:
+      version: ${{ steps.release.outputs.tag_name }}
+
+
     steps:
 
-      - name: Checkout successful build commit
+      - name: Checkout successful commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -39,3 +45,14 @@ jobs:
 
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+
+
+  deploy:
+
+    needs: release
+
+    uses: ./.github/workflows/deploy.yml
+
+    with:
+      version: v${{ github.run_number }}
