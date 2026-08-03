@@ -7,6 +7,7 @@ on:
     types:
       - completed
 
+
 permissions:
   contents: write
 
@@ -22,13 +23,19 @@ jobs:
 
     steps:
 
-      - name: Checkout code
+      - name: Checkout successful build commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
 
       - name: Create GitHub Release
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: Release v${{ github.run_number }}
           generate_release_notes: true
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
