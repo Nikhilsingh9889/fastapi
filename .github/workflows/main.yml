@@ -1,63 +1,30 @@
 name: Deploy FastAPI App
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Docker image tag to deploy"
-        required: false
-        default: latest
+  push:
+    branches:
+      - main
 
 jobs:
   deploy:
-
     runs-on: self-hosted
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           clean: false
 
-
-      - name: Set image variables
+      - name: Print workspace info
         run: |
-          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/fastapi-app" >> $GITHUB_ENV
-          echo "IMAGE_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          pwd
+          ls -la
 
-
-      - name: Debug variables
-        run: |
-          echo "IMAGE_NAME=$IMAGE_NAME"
-          echo "IMAGE_TAG=$IMAGE_TAG"
-
-
-      - name: Login GHCR
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
-          -u "${{ github.actor }}" \
-          --password-stdin
-
-
-      - name: Pull image
-        run: |
-          docker pull $IMAGE_NAME:$IMAGE_TAG
-
-
-      - name: Deploy with Docker Compose
+      - name: Docker Compose Build and Start
         run: |
           cd $GITHUB_WORKSPACE
+          docker compose up --build -d
 
-          IMAGE_NAME=$IMAGE_NAME \
-          IMAGE_TAG=$IMAGE_TAG \
-          docker compose down || true
-
-          IMAGE_NAME=$IMAGE_NAME \
-          IMAGE_TAG=$IMAGE_TAG \
-          docker compose up -d
-
-
-      - name: Show containers
-        run: |
-          docker ps
+      - name: Show running containers
+        run: docker ps
