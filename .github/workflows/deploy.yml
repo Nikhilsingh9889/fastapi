@@ -1,0 +1,32 @@
+name: Deploy FastAPI App
+
+on:
+  release:
+    types:
+      - published
+
+
+jobs:
+
+  deploy:
+
+    runs-on: self-hosted
+
+
+    steps:
+
+      - name: Checkout released version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+
+      - name: Deploy application
+        run: |
+          docker compose down
+          docker compose up --build -d
+
+
+      - name: Verify containers
+        run: |
+          docker ps
