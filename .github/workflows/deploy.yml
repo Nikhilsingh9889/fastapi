@@ -1,9 +1,11 @@
 name: Deploy FastAPI App
 
+
 on:
   release:
     types:
       - published
+
 
 jobs:
 
@@ -11,18 +13,30 @@ jobs:
 
     runs-on: self-hosted
 
+
     steps:
 
-      - name: Debug
+      - name: Debug Release
         run: |
           echo "Release triggered"
           echo "Version: ${{ github.event.release.tag_name }}"
+
 
       - name: Checkout released version
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.release.tag_name }}
 
-      - name: Deploy
+
+      - name: Deploy Application
         run: |
+          echo "Deploying ${{ github.event.release.tag_name }}"
+
+          docker compose down
+
           docker compose up --build -d
+
+
+      - name: Verify containers
+        run: |
+          docker ps
