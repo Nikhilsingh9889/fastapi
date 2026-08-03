@@ -1,35 +1,29 @@
 name: CI/CD Pipeline
-
 on:
   push:
     branches:
       - main
   pull_request:
-
 permissions:
   contents: write
-
 jobs:
   build:
     runs-on: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Build Docker image
         run: |
           docker build -t fastapi-app:latest .
-
   release:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       version: ${{ steps.release.outputs.tag_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Create GitHub Release
         id: release
         uses: softprops/action-gh-release@v2
@@ -39,7 +33,6 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-
   deploy:
     needs: release
     runs-on: self-hosted
@@ -47,18 +40,23 @@ jobs:
       - name: Debug
         run: |
           echo "Deploying version ${{ needs.release.outputs.version }}"
-
+      - name: Backup environment files
+        run: |
+          cp .env /tmp/app.env
+          cp .env.psql /tmp/app.env.psql
       - name: Checkout release version
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.version }}
           clean: false
-
+      - name: Restore environment files
+        run: |
+          cp /tmp/app.env .env
+          cp /tmp/app.env.psql .env.psql
       - name: Deploy
         run: |
           docker compose down
           docker compose up --build -d
-
       - name: Check containers
         run: |
           docker ps
