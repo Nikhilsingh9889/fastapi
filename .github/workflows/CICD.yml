@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          clean: false
       - name: Build Docker image
         run: |
           docker build -t fastapi-app:latest .
@@ -24,6 +26,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          clean: false
       - name: Create GitHub Release
         id: release
         uses: softprops/action-gh-release@v2
