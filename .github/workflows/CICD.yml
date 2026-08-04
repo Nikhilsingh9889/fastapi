@@ -14,7 +14,7 @@ env:
 
   ECR_REPOSITORY: fastapi-ecr
 
-  ECS_CLUSTER: ecs-fastapi
+  ECS_CLUSTER: fastapi-ecs
   ECS_SERVICE: ecs-task-service
   ECS_TASK_DEFINITION: ecs-task
 
