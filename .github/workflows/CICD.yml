@@ -222,31 +222,42 @@ jobs:
 
 
 
-    - name: Create Release
-
+    - name: Create GitHub Release
+      if: success()
       env:
-        GH_TOKEN: ${{ github.token }}
-
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
-
-
         TAG=$(date +%Y.%m.%d)-${GITHUB_SHA:0:7}-v${GITHUB_RUN_NUMBER}
-
-
-        gh release create "$TAG" \
-        --title "Production $TAG" \
-        --notes "
-
+        echo "Creating release: $TAG"
+        BODY=$(cat <<EOF
+        Production deployment completed successfully.
         Commit:
         $GITHUB_SHA
-
         Image:
         $ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}
-
-        Task:
+        Task Definition:
         ${{ steps.task.outputs.arn }}
-
-        "
+        Triggered By:
+        ${{ github.actor }}
+        EOF
+        )
+        curl \
+        -X POST \
+        -H "Authorization: Bearer $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/${{ github.repository }}/releases \
+        -d "$(jq -n \
+          --arg tag "$TAG" \
+          --arg name "Production $TAG" \
+          --arg body "$BODY" \
+          '{
+            tag_name:$tag,
+            name:$name,
+            body:$body,
+            draft:false,
+            prerelease:false
+          }')"
+        echo "✅ Release created: $TAG"
 
 
 
@@ -266,6 +277,10 @@ jobs:
 
 
     timeout-minutes: 60
+
+
+    permissions:
+      contents: write
 
 
     steps:
@@ -393,3 +408,37 @@ jobs:
         echo "Rollback completed"
         echo "Running:"
         echo "${{ steps.rollback.outputs.target }}"
+
+
+
+    - name: Create Rollback Release
+      if: success()
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        TAG=$(date +%Y.%m.%d)-rollback-${GITHUB_RUN_NUMBER}
+        BODY=$(cat <<EOF
+        Production rollback completed.
+        Rollback Task Definition:
+        ${{ steps.rollback.outputs.target }}
+        Triggered By:
+        ${{ github.actor }}
+        EOF
+        )
+        curl \
+        -X POST \
+        -H "Authorization: Bearer $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/${{ github.repository }}/releases \
+        -d "$(jq -n \
+          --arg tag "$TAG" \
+          --arg name "Rollback $TAG" \
+          --arg body "$BODY" \
+          '{
+            tag_name:$tag,
+            name:$name,
+            body:$body,
+            draft:false,
+            prerelease:false
+          }')"
+        echo "✅ Rollback release created"
