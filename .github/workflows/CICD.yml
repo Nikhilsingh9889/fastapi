@@ -1,66 +1,59 @@
 name: CI/CD Pipeline
+
 on:
   push:
     branches:
       - main
   pull_request:
+
 permissions:
   contents: write
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ECR_REPOSITORY: fastapi-ecr
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
-  build:
+  build-and-push:
+
     runs-on: self-hosted
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          clean: false
-      - name: Build Docker image
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build Docker Image
         run: |
-          docker build -t fastapi-app:latest .
-  release:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: self-hosted
-    outputs:
-      version: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: false
-      - name: Create GitHub Release
-        id: release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-  deploy:
-    needs: release
-    runs-on: self-hosted
-    steps:
-      - name: Debug
+          docker build \
+            -t $ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REPOSITORY:latest .
+
+      - name: Tag Docker Image for ECR
         run: |
-          echo "Deploying version ${{ needs.release.outputs.version }}"
-      - name: Backup environment files
+          docker tag \
+          $ECR_REPOSITORY:$IMAGE_TAG \
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+
+          docker tag \
+          $ECR_REPOSITORY:latest \
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+
+      - name: Push Image to ECR
         run: |
-          cp .env /tmp/app.env
-          cp .env.psql /tmp/app.env.psql
-      - name: Checkout release version
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release.outputs.version }}
-          clean: false
-      - name: Restore environment files
-        run: |
-          cp /tmp/app.env .env
-          cp /tmp/app.env.psql .env.psql
-      - name: Deploy
-        run: |
-          docker compose down
-          docker compose up --build -d
-      - name: Check containers
-        run: |
-          docker ps
+          docker push \
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
+
+          docker push \
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
