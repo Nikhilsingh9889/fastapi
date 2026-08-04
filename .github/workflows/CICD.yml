@@ -1,12 +1,47 @@
-name: Build, Push to ECR and Deploy ECS
+name: Production Deployment
 
 on:
   push:
     branches:
-      - main
+      - production
 
-permissions:
-  contents: read
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Action
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - rollback
+
+      rollback_release_tag:
+        description: GitHub release tag to rollback
+        required: false
+        type: string
+
+      rollback_commit_sha:
+        description: Commit SHA to rollback
+        required: false
+        type: string
+
+      rollback_revision:
+        description: ECS task revision
+        required: false
+        type: string
+
+      revisions_back:
+        description: Rollback number of revisions
+        required: false
+        default: "1"
+        type: string
+
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
 
 env:
   AWS_REGION: us-east-1
@@ -20,160 +55,341 @@ env:
 
   CONTAINER_NAME: Main
 
-  IMAGE_TAG: ${{ github.sha }}
 
 
 jobs:
 
-  build-and-push:
 
-    name: Build Docker Image and Push to ECR
+# ============================================================
+# DEPLOY
+# ============================================================
+
+  deploy:
+
+
+    if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+
     runs-on: self-hosted
 
-    outputs:
-      image: ${{ steps.image.outputs.image }}
-
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    timeout-minutes: 60
 
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-
-      - name: Build Docker Image
-        run: |
-          docker build \
-          -t $ECR_REPOSITORY:$IMAGE_TAG .
-
-
-      - name: Tag Docker Image
-        run: |
-          docker tag \
-          $ECR_REPOSITORY:$IMAGE_TAG \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
-
-          docker tag \
-          $ECR_REPOSITORY:$IMAGE_TAG \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
-
-
-      - name: Push Docker Image to ECR
-        run: |
-          docker push \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
-
-          docker push \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
-
-
-      - name: Save Image URI
-        id: image
-        run: |
-          echo "image=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-
-
-  deploy-ecs:
-
-    name: Deploy to ECS Fargate
-    needs: build-and-push
-    runs-on: self-hosted
+    permissions:
+      contents: write
 
 
     steps:
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
 
-
-      - name: Download ECS Task Definition
-        run: |
-          aws ecs describe-task-definition \
-          --task-definition $ECS_TASK_DEFINITION \
-          --region $AWS_REGION \
-          --query taskDefinition \
-          > task-definition.json
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
 
 
-      - name: Clean Task Definition
-        run: |
-          jq 'del(
-          .taskDefinitionArn,
-          .revision,
-          .status,
-          .requiresAttributes,
-          .compatibilities,
-          .registeredAt,
-          .registeredBy
-          )' task-definition.json > clean-task-definition.json
+    - name: AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
 
 
-      - name: Update Container Image
-        run: |
-          jq \
-          --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
-          --arg NAME "$CONTAINER_NAME" \
-          '
-          .containerDefinitions |=
-          map(
-            if .name == $NAME
-            then .image = $IMAGE
-            else .
-            end
-          )
-          ' clean-task-definition.json > new-task-definition.json
+    - name: Login ECR
+      uses: aws-actions/amazon-ecr-login@v2
 
 
 
-      - name: Register New ECS Task Definition
-        id: register
-        run: |
-          REVISION=$(aws ecs register-task-definition \
-          --cli-input-json file://new-task-definition.json \
-          --query "taskDefinition.revision" \
+    - name: Generate Image Tag
+      id: tag
+      run: |
+
+        SHORT_SHA=${GITHUB_SHA:0:7}
+
+        IMAGE_TAG=${SHORT_SHA}-${GITHUB_RUN_NUMBER}
+
+        echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+
+
+    - name: Build Docker Image
+      run: |
+
+        docker build \
+        -t $ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }} .
+
+
+
+    - name: Tag Image
+      run: |
+
+        docker tag \
+        $ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }} \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}
+
+
+
+    - name: Push Image
+      run: |
+
+        docker push \
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}
+
+
+
+    - name: Download Current Task Definition
+      run: |
+
+        aws ecs describe-task-definition \
+        --task-definition $ECS_TASK_DEFINITION \
+        --query taskDefinition \
+        > task.json
+
+
+
+    - name: Create New Task Definition
+      id: task
+      run: |
+
+
+        IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}"
+
+
+        jq \
+        --arg IMAGE "$IMAGE" \
+        --arg NAME "$CONTAINER_NAME" \
+        '
+
+        .containerDefinitions |= map(
+
+          if .name == $NAME
+
+          then .image=$IMAGE
+
+          else .
+
+          end
+
+        )
+
+        |
+
+        del(
+        .taskDefinitionArn,
+        .revision,
+        .status,
+        .requiresAttributes,
+        .compatibilities,
+        .registeredAt,
+        .registeredBy
+        )
+
+        ' task.json > new-task.json
+
+
+
+        ARN=$(aws ecs register-task-definition \
+        --cli-input-json file://new-task.json \
+        --query taskDefinition.taskDefinitionArn \
+        --output text)
+
+
+
+        echo "arn=$ARN" >> $GITHUB_OUTPUT
+
+
+
+    - name: Deploy ECS
+      run: |
+
+
+        aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service $ECS_SERVICE \
+        --task-definition ${{ steps.task.outputs.arn }} \
+        --force-new-deployment
+
+
+
+    - name: Wait ECS
+      run: |
+
+        aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services $ECS_SERVICE
+
+
+
+    - name: Create Release
+
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+      run: |
+
+
+        TAG=$(date +%Y.%m.%d)-${GITHUB_SHA:0:7}-v${GITHUB_RUN_NUMBER}
+
+
+        gh release create "$TAG" \
+        --title "Production $TAG" \
+        --notes "
+
+        Commit:
+        $GITHUB_SHA
+
+        Image:
+        $ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}
+
+        Task:
+        ${{ steps.task.outputs.arn }}
+
+        "
+
+
+
+# ============================================================
+# ROLLBACK
+# ============================================================
+
+
+  rollback:
+
+
+    if: github.event_name == 'workflow_dispatch' &&
+        github.event.inputs.action == 'rollback'
+
+
+    runs-on: self-hosted
+
+
+    timeout-minutes: 60
+
+
+    steps:
+
+
+    - name: AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+
+      with:
+
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+        aws-region: ${{ env.AWS_REGION }}
+
+
+
+
+    - name: Find Rollback Task Definition
+      id: rollback
+
+      env:
+        GH_TOKEN: ${{ github.token }}
+
+      run: |
+
+
+        CURRENT=$(aws ecs describe-services \
+        --cluster $ECS_CLUSTER \
+        --services $ECS_SERVICE \
+        --query services[0].taskDefinition \
+        --output text)
+
+
+
+        echo "Current:"
+        echo $CURRENT
+
+
+
+        # Rollback by ECS revision
+
+        if [ -n "${{ github.event.inputs.rollback_revision }}" ]
+
+        then
+
+
+          TARGET="arn:aws:ecs:$AWS_REGION:$AWS_ACCOUNT_ID:task-definition/$ECS_TASK_DEFINITION:${{ github.event.inputs.rollback_revision }}"
+
+
+        else
+
+
+          BACK=${{ github.event.inputs.revisions_back }}
+
+
+          if [ -z "$BACK" ]
+
+          then
+
+          BACK=1
+
+          fi
+
+
+
+          LIST=$(aws ecs list-task-definitions \
+          --family-prefix $ECS_TASK_DEFINITION \
+          --sort DESC \
+          --query taskDefinitionArns \
           --output text)
 
-          echo "revision=$REVISION" >> $GITHUB_OUTPUT
+
+
+          TARGET=$(echo $LIST | tr '\t' '\n' | sed -n "$((BACK+2))p")
 
 
 
-      - name: Update ECS Service
-        run: |
-          aws ecs update-service \
-          --cluster $ECS_CLUSTER \
-          --service $ECS_SERVICE \
-          --task-definition $ECS_TASK_DEFINITION:${{ steps.register.outputs.revision }} \
-          --force-new-deployment
+        fi
 
 
 
-      - name: Wait for ECS Deployment
-        run: |
-          aws ecs wait services-stable \
-          --cluster $ECS_CLUSTER \
-          --services $ECS_SERVICE
+        echo "Rollback target:"
+        echo $TARGET
 
 
-      - name: Deployment Completed
-        run: |
-          echo "Deployment successful"
-          echo "Cluster: $ECS_CLUSTER"
-          echo "Service: $ECS_SERVICE"
-          echo "Task Definition: $ECS_TASK_DEFINITION:${{ steps.register.outputs.revision }}"
+
+        echo "target=$TARGET" >> $GITHUB_OUTPUT
+
+
+
+
+    - name: Rollback ECS
+
+
+      run: |
+
+
+        aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service $ECS_SERVICE \
+        --task-definition ${{ steps.rollback.outputs.target }} \
+        --force-new-deployment
+
+
+
+
+    - name: Wait Rollback
+
+
+      run: |
+
+
+        aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services $ECS_SERVICE
+
+
+
+    - name: Rollback Complete
+
+      run: |
+
+        echo "Rollback completed"
+        echo "Running:"
+        echo "${{ steps.rollback.outputs.target }}"
