@@ -1,0 +1,91 @@
+name: AWS ECS Debug
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECS_CLUSTER: fastapi-ecs
+  ECS_SERVICE: ecs-task-service
+  ECS_TASK_DEFINITION: ecs-task
+
+
+jobs:
+
+  debug:
+
+    runs-on: self-hosted
+
+    steps:
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Print AWS Identity
+        run: |
+          echo "===== AWS Identity ====="
+          aws sts get-caller-identity
+
+
+      - name: Print AWS Region
+        run: |
+          echo "===== AWS Region ====="
+          echo $AWS_REGION
+
+
+      - name: List ECS Clusters
+        run: |
+          echo "===== ECS Clusters ====="
+          aws ecs list-clusters \
+          --region $AWS_REGION
+
+
+      - name: Describe ECS Cluster
+        run: |
+          echo "===== ECS Cluster Details ====="
+          aws ecs describe-clusters \
+          --clusters $ECS_CLUSTER \
+          --region $AWS_REGION
+
+
+      - name: List ECS Services
+        run: |
+          echo "===== ECS Services ====="
+          aws ecs list-services \
+          --cluster $ECS_CLUSTER \
+          --region $AWS_REGION
+
+
+      - name: Describe ECS Service
+        run: |
+          echo "===== ECS Service Details ====="
+          aws ecs describe-services \
+          --cluster $ECS_CLUSTER \
+          --services $ECS_SERVICE \
+          --region $AWS_REGION
+
+
+      - name: Describe Task Definition
+        run: |
+          echo "===== Task Definition ====="
+          aws ecs describe-task-definition \
+          --task-definition $ECS_TASK_DEFINITION \
+          --region $AWS_REGION
+
+
+      - name: Test ECS Deployment Permission
+        run: |
+          echo "===== Testing Update Service Permission ====="
+          aws ecs update-service \
+          --cluster $ECS_CLUSTER \
+          --service $ECS_SERVICE \
+          --force-new-deployment \
+          --region $AWS_REGION
