@@ -322,14 +322,18 @@ jobs:
 
 
 
-        # Rollback by ECS revision
+        CURRENT_REVISION=${CURRENT##*:}
+
+
+
+        # Determine target revision number
 
         if [ -n "${{ github.event.inputs.rollback_revision }}" ]
 
         then
 
 
-          TARGET="arn:aws:ecs:$AWS_REGION:$AWS_ACCOUNT_ID:task-definition/$ECS_TASK_DEFINITION:${{ github.event.inputs.rollback_revision }}"
+          TARGET_REVISION="${{ github.event.inputs.rollback_revision }}"
 
 
         else
@@ -348,26 +352,75 @@ jobs:
 
 
 
-          LIST=$(aws ecs list-task-definitions \
-          --family-prefix $ECS_TASK_DEFINITION \
-          --sort DESC \
-          --query taskDefinitionArns \
-          --output text)
-
-
-
-          TARGET=$(echo $LIST | tr '\t' '\n' | sed -n "$((BACK+1))p")
-
+          TARGET_REVISION=$((CURRENT_REVISION - BACK))
 
 
         fi
 
 
 
-        if [ -z "$TARGET" ]
+        if [ "$TARGET_REVISION" -lt 1 ]
         then
-          echo "::error::Could not resolve a rollback target. Check that the revision/revisions_back you requested actually exists (family: $ECS_TASK_DEFINITION)."
+          echo "::error::Computed target revision ($TARGET_REVISION) is invalid. Current revision is $CURRENT_REVISION; you asked to go back too far."
           exit 1
+        fi
+
+
+
+        TARGET="arn:aws:ecs:$AWS_REGION:$AWS_ACCOUNT_ID:task-definition/$ECS_TASK_DEFINITION:$TARGET_REVISION"
+
+
+
+        # Confirm it exists (works even if INACTIVE) and check its status
+
+        STATUS=$(aws ecs describe-task-definition \
+        --task-definition $TARGET \
+        --query taskDefinition.status \
+        --output text 2>/dev/null) || STATUS=""
+
+
+
+        if [ -z "$STATUS" ]
+        then
+          echo "::error::Task definition $TARGET does not exist. Check the revision number."
+          exit 1
+        fi
+
+
+
+        echo "Target status: $STATUS"
+
+
+
+        # If it's been deregistered (e.g. by a retention policy), re-register it as a new active revision
+
+        if [ "$STATUS" == "INACTIVE" ]
+        then
+
+          echo "Target is INACTIVE. Re-registering as a new active revision..."
+
+          aws ecs describe-task-definition \
+          --task-definition $TARGET \
+          --query taskDefinition \
+          > rollback-task.json
+
+          jq '
+          del(
+          .taskDefinitionArn,
+          .revision,
+          .status,
+          .requiresAttributes,
+          .compatibilities,
+          .registeredAt,
+          .registeredBy
+          )
+          ' rollback-task.json > new-rollback-task.json
+
+          TARGET=$(aws ecs register-task-definition \
+          --cli-input-json file://new-rollback-task.json \
+          --query taskDefinition.taskDefinitionArn \
+          --output text)
+
         fi
 
 
