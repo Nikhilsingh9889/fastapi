@@ -356,10 +356,18 @@ jobs:
 
 
 
-          TARGET=$(echo $LIST | tr '\t' '\n' | sed -n "$((BACK+2))p")
+          TARGET=$(echo $LIST | tr '\t' '\n' | sed -n "$((BACK+1))p")
 
 
 
+        fi
+
+
+
+        if [ -z "$TARGET" ]
+        then
+          echo "::error::Could not resolve a rollback target. Check that the revision/revisions_back you requested actually exists (family: $ECS_TASK_DEFINITION)."
+          exit 1
         fi
 
 
