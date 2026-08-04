@@ -4,64 +4,70 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version to rollback"
+        description: "Release version (example: v24)"
         required: true
         default: "v24"
 
-
 jobs:
-
   rollback:
-
     runs-on: self-hosted
 
-
     steps:
-
       - name: Backup environment files
         run: |
           cp .env /tmp/app.env
           cp .env.psql /tmp/app.env.psql
 
-
-      - name: Checkout selected release
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.version }}
-          clean: false
           fetch-depth: 0
+          clean: false
 
+      - name: Fetch all branches and tags
+        run: |
+          git fetch origin --prune
+          git fetch origin --tags --force
+
+      - name: Checkout selected release
+        run: |
+          echo "Checking out ${{ github.event.inputs.version }}"
+          git checkout tags/${{ github.event.inputs.version }} -f
+
+      - name: Verify checked out version
+        run: |
+          echo "Current tag:"
+          git describe --tags --always
+          echo ""
+          echo "Current commit:"
+          git rev-parse HEAD
+          echo ""
+          git log --oneline -1
 
       - name: Restore environment files
         run: |
           cp /tmp/app.env .env
           cp /tmp/app.env.psql .env.psql
 
-
-      - name: Show rollback version
-        run: |
-          echo "Rolling back to ${{ inputs.version }}"
-
-
-      - name: Stop current deployment
+      - name: Stop existing containers
         run: |
           docker compose down
 
+      - name: Remove old image (optional)
+        run: |
+          docker image rm fastapi-app:latest || true
 
       - name: Build rollback version
         run: |
           docker compose build --no-cache
 
-
-      - name: Start rollback deployment
+      - name: Start rollback version
         run: |
           docker compose up -d
 
-
-      - name: Verify containers
+      - name: Show running containers
         run: |
           docker ps
-
 
       - name: Health check
         run: |
