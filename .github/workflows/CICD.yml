@@ -1,28 +1,43 @@
-name: CI/CD Pipeline
+name: Build, Push to ECR and Deploy ECS
 
 on:
   push:
     branches:
       - main
-  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 380277571706
+
   ECR_REPOSITORY: fastapi-ecr
+
+  ECS_CLUSTER: ecs-fastapi
+  ECS_SERVICE: ecs-task-service
+  ECS_TASK_DEFINITION: ecs-task
+
+  CONTAINER_NAME: Main
+
   IMAGE_TAG: ${{ github.sha }}
 
+
 jobs:
+
   build-and-push:
 
+    name: Build Docker Image and Push to ECR
     runs-on: self-hosted
 
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -31,29 +46,134 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
+
 
       - name: Build Docker Image
         run: |
           docker build \
-            -t $ECR_REPOSITORY:$IMAGE_TAG \
-            -t $ECR_REPOSITORY:latest .
+          -t $ECR_REPOSITORY:$IMAGE_TAG .
 
-      - name: Tag Docker Image for ECR
+
+      - name: Tag Docker Image
         run: |
           docker tag \
           $ECR_REPOSITORY:$IMAGE_TAG \
           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
           docker tag \
-          $ECR_REPOSITORY:latest \
+          $ECR_REPOSITORY:$IMAGE_TAG \
           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
 
-      - name: Push Image to ECR
+
+      - name: Push Docker Image to ECR
         run: |
           docker push \
           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
           docker push \
           $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:latest
+
+
+      - name: Save Image URI
+        id: image
+        run: |
+          echo "image=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+
+
+  deploy-ecs:
+
+    name: Deploy to ECS Fargate
+    needs: build-and-push
+    runs-on: self-hosted
+
+
+    steps:
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      - name: Download ECS Task Definition
+        run: |
+          aws ecs describe-task-definition \
+          --task-definition $ECS_TASK_DEFINITION \
+          --region $AWS_REGION \
+          --query taskDefinition \
+          > task-definition.json
+
+
+
+      - name: Clean Task Definition
+        run: |
+          jq 'del(
+          .taskDefinitionArn,
+          .revision,
+          .status,
+          .requiresAttributes,
+          .compatibilities,
+          .registeredAt,
+          .registeredBy
+          )' task-definition.json > clean-task-definition.json
+
+
+
+      - name: Update Container Image
+        run: |
+          jq \
+          --arg IMAGE "${{ needs.build-and-push.outputs.image }}" \
+          --arg NAME "$CONTAINER_NAME" \
+          '
+          .containerDefinitions |=
+          map(
+            if .name == $NAME
+            then .image = $IMAGE
+            else .
+            end
+          )
+          ' clean-task-definition.json > new-task-definition.json
+
+
+
+      - name: Register New ECS Task Definition
+        id: register
+        run: |
+          REVISION=$(aws ecs register-task-definition \
+          --cli-input-json file://new-task-definition.json \
+          --query "taskDefinition.revision" \
+          --output text)
+
+          echo "revision=$REVISION" >> $GITHUB_OUTPUT
+
+
+
+      - name: Update ECS Service
+        run: |
+          aws ecs update-service \
+          --cluster $ECS_CLUSTER \
+          --service $ECS_SERVICE \
+          --task-definition $ECS_TASK_DEFINITION:${{ steps.register.outputs.revision }} \
+          --force-new-deployment
+
+
+
+      - name: Wait for ECS Deployment
+        run: |
+          aws ecs wait services-stable \
+          --cluster $ECS_CLUSTER \
+          --services $ECS_SERVICE
+
+
+      - name: Deployment Completed
+        run: |
+          echo "Deployment successful"
+          echo "Cluster: $ECS_CLUSTER"
+          echo "Service: $ECS_SERVICE"
+          echo "Task Definition: $ECS_TASK_DEFINITION:${{ steps.register.outputs.revision }}"
